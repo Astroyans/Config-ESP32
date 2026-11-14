@@ -1,60 +1,104 @@
 #include <Arduino.h>
+#include <painlessMesh.h>
 #include <SPI.h>
 #include <SD.h>
 
-#define PIN_CS_SD 5
-String lastSavedRoute = "";
+// --- MicroSD Configuration (SPI) ---
+#define SD_CS 5
+const char* FILE_PATH = "/ruta.txt";
 
-void saveAndVerifySD(String newRoute) {
-  // 1. Overwrite the file on the SD card
-  File file = SD.open("/ruta.txt", FILE_WRITE);
-  if (file) {
-    file.print(newRoute);
-    file.close();
-    lastSavedRoute = newRoute;
-    Serial.println("-> [OK] File updated on the SD card without rebooting.");
-  } else {
-    Serial.println("-> [ERROR] Could not write to the SD card.");
+// --- Mesh Network Configuration (Must match all ESP32 nodes) ---
+#define MESH_PREFIX     "MESH_NAME"
+#define MESH_PASSWORD   "MESH_PASSWORD"
+#define MESH_PORT       5555
+#define MESH_CHANNEL    1
+
+Scheduler userScheduler;
+painlessMesh mesh;
+bool sdReady = false;
+
+// Overwrite /ruta.txt and read back to verify integrity without rebooting
+void saveRouteToSD(const String& newRoute) {
+  if (!sdReady) {
+    Serial.println("[ERROR] SD card not initialized. Cannot save route.");
     return;
   }
 
-  // 2. Read the file back to confirm it was saved
-  file = SD.open("/ruta.txt", FILE_READ);
+  if (SD.exists(FILE_PATH)) {
+    SD.remove(FILE_PATH);
+  }
+
+  File file = SD.open(FILE_PATH, FILE_WRITE);
+  if (!file) {
+    Serial.println("-> [ERROR] Failed to open /ruta.txt for writing.");
+    return;
+  }
+
+  file.print(newRoute);
+  file.close();
+  Serial.println("-> [OK] /ruta.txt updated in MicroSD without rebooting.");
+
+  file = SD.open(FILE_PATH, FILE_READ);
   if (file) {
-    Serial.print("-> Current content on SD: ");
+    Serial.print("-> [SD VERIFIED]: ");
     while (file.available()) {
       Serial.write(file.read());
     }
-    Serial.println("\n-----------------------------------");
+    Serial.println();
     file.close();
   }
+}
+
+void receivedCallback(uint32_t from, String &msg) {
+  Serial.printf("\n[MESH RX from %u] %s\n", from, msg.c_str());
+  saveRouteToSD(msg);
+}
+
+void newConnectionCallback(uint32_t nodeId) {
+  Serial.printf("--> [CONNECTED] Node %u joined the mesh.\n", nodeId);
+}
+
+void droppedConnectionCallback(uint32_t nodeId) {
+  Serial.printf("--> [DISCONNECTED] Node %u dropped from the mesh.\n", nodeId);
+}
+
+void changedConnectionCallback() {
+  Serial.printf("--> [TOPOLOGY UPDATE] Active nodes: %d\n", mesh.getNodeList().size());
 }
 
 void setup() {
   Serial.begin(115200);
-  delay(1000);
+  delay(500);
 
-  Serial.println("Starting MicroSD module...");
-  if (!SD.begin(PIN_CS_SD)) {
-    Serial.println("[FAIL] SD card not detected. Check the wiring or the format (must be FAT32).");
-    while (true); // Halt here on wiring error
+  if (!SD.begin(SD_CS)) {
+    Serial.println("[FAIL] SD card not detected. Check wiring or FAT32 format.");
+    sdReady = false;
+  } else {
+    Serial.println("[READY] MicroSD card initialized.");
+    sdReady = true;
   }
-  Serial.println("[READY] SD card detected. Type a route above and press Enter:");
+
+  mesh.setDebugMsgTypes(ERROR | STARTUP);
+  mesh.init(MESH_PREFIX, MESH_PASSWORD, &userScheduler, MESH_PORT, WIFI_AP_STA, MESH_CHANNEL);
+  mesh.onReceive(&receivedCallback);
+  mesh.onNewConnection(&newConnectionCallback);
+  mesh.onDroppedConnection(&droppedConnectionCallback);
+  mesh.onChangedConnections(&changedConnectionCallback);
+
+  Serial.print("[READY] Mesh Storage Node ID: ");
+  Serial.println(mesh.getNodeId());
 }
 
 void loop() {
-  // Simulates receiving an update from the network
-  if (Serial.available()) {
-    String incomingData = Serial.readStringUntil('\n');
-    incomingData.trim(); // Strip invisible line breaks
+  mesh.update();
 
-    if (incomingData.length() > 0) {
-      if (incomingData != lastSavedRoute) {
-        Serial.println("Change detected: " + incomingData);
-        saveAndVerifySD(incomingData);
-      } else {
-        Serial.println("Data is identical to the current one. Nothing to do.");
-      }
+  // Allows local manual testing via Serial Monitor
+  if (Serial.available()) {
+    String manualInput = Serial.readStringUntil('\n');
+    manualInput.trim();
+    if (manualInput.length() > 0) {
+      Serial.println("\n[SERIAL TEST] Writing manual input to SD...");
+      saveRouteToSD(manualInput);
     }
   }
 }
