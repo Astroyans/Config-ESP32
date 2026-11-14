@@ -1,6 +1,6 @@
-# Config-ESP32 — MicroSD Storage Node (MQTT)
+# Config-ESP32 — Local MicroSD Storage Node
 
-**ESP32 DevKit V1** node designed to receive route/map updates via **MQTT** over a local network (Access Point) and store them on a **MicroSD** card (`/ruta.txt`) in real time without rebooting the board.
+**ESP32 DevKit V1** setup for writing, overwriting, and verifying route/map data on a **MicroSD** card (`/ruta.txt`) in real time via Serial communication without rebooting the board.
 
 ---
 
@@ -32,17 +32,14 @@ To compile and flash the firmware using **Arduino IDE**:
    * Install the **esp32** board package (by Espressif Systems) via the Boards Manager.
    * Select board: `DOIT ESP32 DEVKIT V1`.
 3. **Required Libraries:**
-   * `PubSubClient` (by Nick O'Leary) — install via the Library Manager.
-   * `WiFi.h`, `SPI.h`, and `SD.h` — included natively with the ESP32 core.
+   * `SPI.h` and `SD.h` — included natively with the ESP32 core.
 
 ---
 
-## Configuration & Usage
+## How to Run & Verify (Current Stage)
 
-1. Before uploading the sketch, fill in your network credentials in the code *(never commit real Wi-Fi passwords to the repository)*:
-   * `ssid`: Wi-Fi network name broadcast by the Access Point.
-   * `password`: Wi-Fi network password.
-   * `mqtt_server`: Static IP address of the MQTT Broker (Mosquitto).
-   * `topic`: Subscription channel (e.g., `marte/ruta`).
-2. Select the assigned `COM` port and upload the code (`Upload Speed: 115200`).
-3. Open the **Serial Monitor** at **`115200 baud`** to verify SD initialization, MQTT connection status, and live writes to `/ruta.txt`.
+1. Connect the ESP32 to your PC using a **data-capable USB cable** and select the assigned `COM` port under **Tools > Port**.
+2. Upload the sketch (`Upload Speed: 115200`).
+3. Open the **Serial Monitor** (`Ctrl + Shift + M`) and set the baud rate to **`115200 baud`**.
+4. Press the physical **`EN`** (reset) button on the ESP32 to verify SD card initialization.
+5. Type a test route string in the Serial Monitor input bar (e.g., `X:12.4, Y:45.8`) and press **Enter** to confirm `/ruta.txt` is overwritten and read back without rebooting.
