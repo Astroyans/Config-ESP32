@@ -7,21 +7,20 @@
 #define SD_CS 5
 const char* FILE_PATH = "/ruta.txt";
 
-// --- Mesh Network Configuration (Must match all ESP32 nodes) ---
-#define MESH_PREFIX     "MESH_NAME"
-#define MESH_PASSWORD   "MESH_PASSWORD"
-#define MESH_PORT       5555
-#define MESH_CHANNEL    1
+// --- Mesh Network Configuration (Must match the Dual node) ---
+#define MESH_PREFIX       "NOMBRE_DE_LA_MALLA"
+#define MESH_PASSWORD     "CONTRASENA_DE_LA_MALLA"
+#define MESH_PORT         5555
+#define MESH_CHANNEL      1
 
 Scheduler userScheduler;
 painlessMesh mesh;
 bool sdReady = false;
 
-// Overwrite /ruta.txt and read back to verify integrity without rebooting
-void saveRouteToSD(const String& newRoute) {
+bool saveRouteToSD(const String& newRoute) {
   if (!sdReady) {
-    Serial.println("[ERROR] SD card not initialized. Cannot save route.");
-    return;
+    Serial.println("[ERROR] SD card not initialized.");
+    return false;
   }
 
   if (SD.exists(FILE_PATH)) {
@@ -31,13 +30,14 @@ void saveRouteToSD(const String& newRoute) {
   File file = SD.open(FILE_PATH, FILE_WRITE);
   if (!file) {
     Serial.println("-> [ERROR] Failed to open /ruta.txt for writing.");
-    return;
+    return false;
   }
 
   file.print(newRoute);
   file.close();
-  Serial.println("-> [OK] /ruta.txt updated in MicroSD without rebooting.");
+  Serial.println("-> [OK] /ruta.txt updated without rebooting.");
 
+  // Verify written content
   file = SD.open(FILE_PATH, FILE_READ);
   if (file) {
     Serial.print("-> [SD VERIFIED]: ");
@@ -47,11 +47,20 @@ void saveRouteToSD(const String& newRoute) {
     Serial.println();
     file.close();
   }
+  return true;
 }
 
 void receivedCallback(uint32_t from, String &msg) {
-  Serial.printf("\n[MESH RX from %u] %s\n", from, msg.c_str());
-  saveRouteToSD(msg);
+  // Ignore acknowledgment messages from other nodes
+  if (msg.startsWith("ACK:")) return;
+
+  Serial.printf("\n[DUAL -> NODE] Route received from %u: %s\n", from, msg.c_str());
+
+  if (saveRouteToSD(msg)) {
+    mesh.sendSingle(from, "ACK: Saved /ruta.txt (" + String(msg.length()) + " bytes)");
+  } else {
+    mesh.sendSingle(from, "ACK: Received, but SD write failed");
+  }
 }
 
 void newConnectionCallback(uint32_t nodeId) {
@@ -63,7 +72,7 @@ void droppedConnectionCallback(uint32_t nodeId) {
 }
 
 void changedConnectionCallback() {
-  Serial.printf("--> [TOPOLOGY UPDATE] Active nodes: %d\n", mesh.getNodeList().size());
+  Serial.printf("--> [TOPOLOGY] Active mesh peers: %d\n", mesh.getNodeList().size());
 }
 
 void setup() {
@@ -80,25 +89,19 @@ void setup() {
 
   mesh.setDebugMsgTypes(ERROR | STARTUP);
   mesh.init(MESH_PREFIX, MESH_PASSWORD, &userScheduler, MESH_PORT, WIFI_AP_STA, MESH_CHANNEL);
+
+  // Inform this node that a root bridge exists in the network
+  mesh.setContainsRoot(true);
+
   mesh.onReceive(&receivedCallback);
   mesh.onNewConnection(&newConnectionCallback);
   mesh.onDroppedConnection(&droppedConnectionCallback);
   mesh.onChangedConnections(&changedConnectionCallback);
 
-  Serial.print("[READY] Mesh Storage Node ID: ");
+  Serial.print("[READY] Normal Storage Node ID: ");
   Serial.println(mesh.getNodeId());
 }
 
 void loop() {
   mesh.update();
-
-  // Allows local manual testing via Serial Monitor
-  if (Serial.available()) {
-    String manualInput = Serial.readStringUntil('\n');
-    manualInput.trim();
-    if (manualInput.length() > 0) {
-      Serial.println("\n[SERIAL TEST] Writing manual input to SD...");
-      saveRouteToSD(manualInput);
-    }
-  }
 }
